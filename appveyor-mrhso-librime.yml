@@ -21,7 +21,6 @@ cache:
 init:
   - git --version
   - cmake --version
-  - msbuild /version
   - git config --global core.autocrlf true
 
 install:
@@ -47,6 +46,6 @@ artifacts:
   - path: rime.zip
     name: Binaries, includes and OpenCC data
 
-branches:
+ branches:
   only:
   - mrhso-librime
