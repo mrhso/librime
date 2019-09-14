@@ -20,6 +20,9 @@ using VertexQueue = std::priority_queue<Vertex,
                                         vector<Vertex>,
                                         std::greater<Vertex>>;
 
+const double kCompletionPenalty = -0.6931471805599453; // log(0.5)
+const double kCorrectionCredibility = -4.605170185988091; // log(0.01)
+
 int Syllabifier::BuildSyllableGraph(const string &input,
                                     Prism &prism,
                                     SyllableGraph *graph) {
@@ -36,10 +39,11 @@ int Syllabifier::BuildSyllableGraph(const string &input,
     size_t current_pos = vertex.first;
 
     // record a visit to the vertex
-    if (graph->vertices.find(current_pos) == graph->vertices.end())
+    if (graph->vertices.find(current_pos) == graph->vertices.end()) {
       graph->vertices.insert(vertex);  // preferred spelling type comes first
-    else {
-//      graph->vertices[current_pos] = std::min(vertex.second, graph->vertices[current_pos]);
+    } else {
+//      graph->vertices[current_pos] =
+//          std::min(vertex.second, graph->vertices[current_pos]);
       continue;  // discard worse spelling types
     }
 
@@ -49,17 +53,19 @@ int Syllabifier::BuildSyllableGraph(const string &input,
 
     // see where we can go by advancing a syllable
     vector<Prism::Match> matches;
-    set<SyllableId> match_set;
+    set<SyllableId> exact_match_syllables;
     auto current_input = input.substr(current_pos);
     prism.CommonPrefixSearch(current_input, &matches);
-    for (auto &m : matches) {
-      match_set.insert(m.value);
-    }
-    if (enable_correction_) {
+    if (corrector_) {
+      for (auto &m : matches) {
+        exact_match_syllables.insert(m.value);
+      }
       Corrections corrections;
       corrector_->ToleranceSearch(prism, current_input, &corrections, 5);
       for (const auto &m : corrections) {
-        for (auto accessor = prism.QuerySpelling(m.first); !accessor.exhausted(); accessor.Next()) {
+        for (auto accessor = prism.QuerySpelling(m.first);
+             !accessor.exhausted();
+             accessor.Next()) {
           if (accessor.properties().type == kNormalSpelling) {
             matches.push_back({ m.first, m.second.length });
             break;
@@ -97,9 +103,11 @@ int Syllabifier::BuildSyllableGraph(const string &input,
             props.end_pos = end_pos;
             // add a syllable with properties to the edge's
             // spelling-to-syllable map
-            if (match_set.find(m.value) == match_set.end()) {
+            if (corrector_ &&
+                exact_match_syllables.find(m.value) ==
+                exact_match_syllables.end()) {
               props.is_correction = true;
-              props.credibility = 0.01;
+              props.credibility = kCorrectionCredibility;
             }
             auto it = spellings.find(syllable_id);
             if (it == spellings.end()) {
@@ -116,7 +124,7 @@ int Syllabifier::BuildSyllableGraph(const string &input,
           accessor.Next();
         }
         if (spellings.empty()) {
-          DLOG(INFO) << "not spelt.";
+          DLOG(INFO) << "not spelled.";
           end_vertices.erase(end_pos);
           continue;
         }
@@ -207,7 +215,7 @@ int Syllabifier::BuildSyllableGraph(const string &input,
           SpellingProperties props = accessor.properties();
           if (props.type < kAbbreviation) {
             props.type = kCompletion;
-            props.credibility *= 0.5;
+            props.credibility += kCompletionPenalty;
             props.end_pos = end_pos;
             // add a syllable with properties to the edge's
             // spelling-to-syllable map
@@ -240,7 +248,7 @@ int Syllabifier::BuildSyllableGraph(const string &input,
 
 void Syllabifier::CheckOverlappedSpellings(SyllableGraph *graph,
                                            size_t start, size_t end) {
-  const double kPenaltyForAmbiguousSyllable = 1e-10;
+  const double kPenaltyForAmbiguousSyllable = -23.025850929940457; // log(1e-10)
   if (!graph || graph->edges.find(start) == graph->edges.end())
     return;
   // if "Z" = "YX", mark the vertex between Y and X an ambiguous syllable joint
@@ -259,7 +267,7 @@ void Syllabifier::CheckOverlappedSpellings(SyllableGraph *graph,
         // discourage syllables at an ambiguous joint
         // bad cases include pinyin syllabification "niju'ede"
         for (auto& spelling : x.second) {
-          spelling.second.credibility *= kPenaltyForAmbiguousSyllable;
+          spelling.second.credibility += kPenaltyForAmbiguousSyllable;
         }
         graph->vertices[joint] = kAmbiguousSpelling;
         DLOG(INFO) << "ambiguous syllable joint at position " << joint << ".";
@@ -281,9 +289,8 @@ void Syllabifier::Transpose(SyllableGraph* graph) {
   }
 }
 
-void Syllabifier::EnableCorrection(an<Corrector> corrector) {
-  enable_correction_ = true;
-  corrector_ = std::move(corrector);
+void Syllabifier::EnableCorrection(Corrector* corrector) {
+  corrector_ = corrector;
 }
 
 }  // namespace rime

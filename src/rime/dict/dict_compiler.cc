@@ -5,6 +5,8 @@
 // 2011-11-27 GONG Chen <chen.sst@gmail.com>
 //
 #include <boost/filesystem.hpp>
+#include <cfloat>
+#include <cmath>
 #include <fstream>
 #include <rime/algo/algebra.h>
 #include <rime/algo/utilities.h>
@@ -74,7 +76,7 @@ bool DictCompiler::Compile(const string &schema_file) {
       cc.ProcessFile(file_name);
     }
     if (settings.use_preset_vocabulary()) {
-      cc.ProcessFile(PresetVocabulary::DictFilePath());
+      cc.ProcessFile(PresetVocabulary::DictFilePath(settings.vocabulary()));
     }
     dict_file_checksum = cc.Checksum();
   }
@@ -176,7 +178,7 @@ bool DictCompiler::BuildTable(DictSettings* settings,
       auto e = New<DictEntry>();
       e->code.swap(code);
       e->text.swap(r.text);
-      e->weight = r.weight;
+      e->weight = log(r.weight > 0 ? r.weight : DBL_EPSILON);
       ls->push_back(e);
     }
     if (settings->sort_order() != "original") {
